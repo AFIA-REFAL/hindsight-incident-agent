@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
+import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 STATE_DIR = PROJECT_ROOT / ".incidentmind"
 BANK_DIR = STATE_DIR / "banks"
 STATS_PATH = STATE_DIR / "stats.json"
+DATABASE_PATH = STATE_DIR / "memory.sqlite3"
 SAMPLE_ALERTS = [
     "payments-api: DB unreachable",
     "search-service: OOM after deploy",
@@ -136,6 +140,63 @@ def ensure_state_files() -> None:
     BANK_DIR.mkdir(exist_ok=True)
     if not STATS_PATH.exists():
         STATS_PATH.write_text(json.dumps({}, indent=2), encoding="utf-8")
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memories (
+                bank_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                context TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                remote_synced INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (bank_id, id)
+            )
+            """
+        )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(memories)")}
+        if "remote_synced" not in columns:
+            connection.execute(
+                "ALTER TABLE memories ADD COLUMN remote_synced INTEGER NOT NULL DEFAULT 0"
+            )
+        connection.execute("CREATE TABLE IF NOT EXISTS memory_banks (bank_id TEXT PRIMARY KEY)")
+        connection.execute("CREATE INDEX IF NOT EXISTS memories_by_bank ON memories (bank_id)")
+        connection.execute("CREATE TABLE IF NOT EXISTS storage_migrations (name TEXT PRIMARY KEY)")
+        migrated = connection.execute(
+            "SELECT 1 FROM storage_migrations WHERE name = 'legacy-json-v1'"
+        ).fetchone()
+        if not migrated:
+            for bank_file in BANK_DIR.glob("*.json"):
+                try:
+                    records = json.loads(bank_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                connection.execute(
+                    "INSERT OR IGNORE INTO memory_banks (bank_id) VALUES (?)",
+                    (bank_file.stem,),
+                )
+                if not isinstance(records, list):
+                    continue
+                for record in records:
+                    if not isinstance(record, dict) or not record.get("content"):
+                        continue
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO memories
+                            (bank_id, id, content, context, timestamp, remote_synced)
+                        VALUES (?, ?, ?, ?, ?, 0)
+                        """,
+                        (
+                            str(record.get("bank_id") or bank_file.stem),
+                            str(record.get("id") or uuid.uuid4().hex),
+                            str(record["content"]),
+                            str(record.get("context") or "incident"),
+                            str(record.get("timestamp") or utc_now_iso()),
+                        ),
+                    )
+            connection.execute(
+                "INSERT INTO storage_migrations (name) VALUES ('legacy-json-v1')"
+            )
 
 
 def read_stats() -> dict[str, Any]:
@@ -187,29 +248,84 @@ def get_bank_file(bank_id: str) -> Path:
 
 
 def get_bank_records(bank_id: str) -> list[dict[str, Any]]:
-    path = get_bank_file(bank_id)
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, list) else []
-    except json.JSONDecodeError:
-        return []
+    ensure_state_files()
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT id, bank_id, content, context, timestamp FROM memories WHERE bank_id = ? ORDER BY rowid",
+            (bank_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def save_bank_records(bank_id: str, records: list[dict[str, Any]]) -> None:
-    path = get_bank_file(bank_id)
-    path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    ensure_state_files()
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO memory_banks (bank_id) VALUES (?)", (bank_id,)
+        )
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO memories
+                (bank_id, id, content, context, timestamp, remote_synced)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            [
+                (
+                    bank_id,
+                    str(record.get("id") or uuid.uuid4().hex),
+                    str(record.get("content", "")),
+                    str(record.get("context") or "incident"),
+                    str(record.get("timestamp") or utc_now_iso()),
+                )
+                for record in records
+                if record.get("content")
+            ],
+        )
+
+
+def get_pending_memories(bank_id: str) -> list[dict[str, Any]]:
+    ensure_state_files()
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT id, bank_id, content, context, timestamp FROM memories WHERE bank_id = ? AND remote_synced = 0 ORDER BY rowid",
+            (bank_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_memory_synced(bank_id: str, memory_id: str) -> None:
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        connection.execute(
+            "UPDATE memories SET remote_synced = 1 WHERE bank_id = ? AND id = ?",
+            (bank_id, memory_id),
+        )
+
+
+def get_memory_bank_names() -> list[str]:
+    ensure_state_files()
+    with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+        bank_names = {
+            str(row[0])
+            for row in connection.execute("SELECT bank_id FROM memory_banks").fetchall()
+        }
+    bank_names.update(path.stem for path in BANK_DIR.glob("*.json"))
+    return sorted(bank_names or {SEED_BANK_ID})
 
 
 class LocalMemory:
     def ensure_bank(self, bank_id: str) -> None:
-        save_bank_records(bank_id, get_bank_records(bank_id))
+        ensure_state_files()
+        with closing(sqlite3.connect(DATABASE_PATH, timeout=10)) as connection, connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO memory_banks (bank_id) VALUES (?)", (bank_id,)
+            )
 
     def retain(self, bank_id: str, content: str, context: str, timestamp: str | None = None) -> dict[str, Any]:
         records = get_bank_records(bank_id)
         record = {
-            "id": f"local-{len(records) + 1}-{int(datetime.now(timezone.utc).timestamp())}",
+            "id": uuid.uuid4().hex,
             "bank_id": bank_id,
             "content": content,
             "context": context,
@@ -267,7 +383,17 @@ class MemoryClient:
         self.local = LocalMemory()
         self.real_client = None
         self.use_real = False
+        self.remote_error: str | None = None
         self._init_real_client()
+
+    def _set_remote_error(self, error: Exception) -> None:
+        self.remote_error = f"{type(error).__name__}: {error}"[:300]
+
+    def close(self) -> None:
+        if self.real_client is not None:
+            close = getattr(self.real_client, "close", None)
+            if callable(close):
+                close()
 
     def _init_real_client(self) -> None:
         if Hindsight is None:
@@ -279,58 +405,93 @@ class MemoryClient:
             base_url = (os.getenv("HINDSIGHT_API_URL") or os.getenv("HINDSIGHT_BASE_URL") or DEFAULT_HINDSIGHT_URL).rstrip("/")
             self.real_client = Hindsight(base_url=base_url, api_key=api_key, timeout=60.0)
             self.use_real = True
-        except Exception:
-            self.real_client = None
-            self.use_real = False
+        except Exception as exc:
+            self._set_remote_error(exc)
+
+    def _retain_remotely(self, record: dict[str, Any]) -> None:
+        if self.real_client is None:
+            return
+        timestamp = datetime.fromisoformat(
+            str(record["timestamp"]).replace("Z", "+00:00")
+        )
+        self.real_client.retain(
+            bank_id=str(record["bank_id"]),
+            content=str(record["content"]),
+            context=str(record["context"]),
+            timestamp=timestamp,
+            document_id=str(record["id"]),
+        )
+        mark_memory_synced(str(record["bank_id"]), str(record["id"]))
+
+    def _sync_pending(self, bank_id: str) -> None:
+        if not self.use_real or self.real_client is None:
+            return
+        try:
+            for record in get_pending_memories(bank_id):
+                self._retain_remotely(record)
+            self.remote_error = None
+        except Exception as exc:
+            self._set_remote_error(exc)
 
     def ensure_bank(self, bank_id: str) -> None:
-        if self.use_real and self.real_client is not None:
-            try:
-                if hasattr(self.real_client, "create_bank"):
-                    self.real_client.create_bank(bank_id=bank_id, name=bank_id, mission="Store incident history and failed fixes for the team.")
-                elif hasattr(self.real_client, "acreate_bank"):
-                    self.real_client.acreate_bank(bank_id=bank_id, name=bank_id, mission="Store incident history and failed fixes for the team.")
-            except Exception:
-                pass
-            return
         self.local.ensure_bank(bank_id)
+        if not self.use_real or self.real_client is None:
+            return
+        try:
+            self.real_client.create_bank(
+                bank_id=bank_id,
+                name=bank_id,
+                mission="Store incident history and failed fixes for the team.",
+            )
+        except Exception as exc:
+            status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+            if status != 409 and "already exists" not in str(exc).lower():
+                self._set_remote_error(exc)
+                return
+        self._sync_pending(bank_id)
 
     def retain(self, bank_id: str, content: str, context: str, timestamp: str | None = None) -> Any:
-        if self.use_real and self.real_client is not None:
-            try:
-                if hasattr(self.real_client, "retain"):
-                    return self.real_client.retain(bank_id=bank_id, content=content, context=context, timestamp=timestamp or utc_now_iso())
-                if hasattr(self.real_client, "aretain"):
-                    return self.real_client.aretain(bank_id=bank_id, content=content, context=context, timestamp=timestamp or utc_now_iso())
-            except Exception:
-                pass
-        return self.local.retain(bank_id, content, context, timestamp)
+        record = self.local.retain(bank_id, content, context, timestamp)
+        self._sync_pending(bank_id)
+        return record
 
     def recall(self, bank_id: str, query: str) -> dict[str, Any]:
+        local_results = self.local.recall(bank_id, query).get("results", [])
+        remote_results: list[dict[str, Any]] = []
         if self.use_real and self.real_client is not None:
             try:
-                if hasattr(self.real_client, "recall"):
-                    return self.real_client.recall(bank_id=bank_id, query=query, max_tokens=1200, budget="high")
-                if hasattr(self.real_client, "arecall"):
-                    return self.real_client.arecall(bank_id=bank_id, query=query, max_tokens=1200, budget="high")
-            except Exception:
-                pass
-        return self.local.recall(bank_id, query)
+                response = self.real_client.recall(
+                    bank_id=bank_id, query=query, max_tokens=1200, budget="high"
+                )
+                remote_results = normalize_recall_response(response)
+                if not get_pending_memories(bank_id):
+                    self.remote_error = None
+            except Exception as exc:
+                self._set_remote_error(exc)
+        combined: list[dict[str, Any]] = []
+        seen_text: set[str] = set()
+        for result in [*remote_results, *local_results]:
+            text = str(result.get("text", "")).strip()
+            key = text.casefold()
+            if text and key not in seen_text:
+                combined.append({**result, "text": text})
+                seen_text.add(key)
+        return {"results": combined[:8]}
 
     def reflect(self, bank_id: str, query: str) -> str:
+        local_insight = self.local.reflect(bank_id, query)
         if self.use_real and self.real_client is not None:
             try:
-                if hasattr(self.real_client, "reflect"):
-                    res = self.real_client.reflect(bank_id=bank_id, query=query, budget="low")
-                    return getattr(res, "text", None) or str(res)
-                if hasattr(self.real_client, "areflect"):
-                    res = self.real_client.areflect(bank_id=bank_id, query=query, budget="low")
-                    return getattr(res, "text", None) or str(res)
-            except Exception:
-                pass
-        return self.local.reflect(bank_id, query)
+                response = self.real_client.reflect(bank_id=bank_id, query=query, budget="low")
+                if not get_pending_memories(bank_id):
+                    self.remote_error = None
+                return getattr(response, "text", None) or str(response)
+            except Exception as exc:
+                self._set_remote_error(exc)
+        return local_insight
 
 
+@st.cache_resource(on_release=lambda client: client.close())
 def get_memory_client() -> MemoryClient:
     return MemoryClient()
 
@@ -340,11 +501,7 @@ def strip_think_blocks(text: str) -> str:
 
 
 def read_bank_names() -> list[str]:
-    ensure_state_files()
-    bank_names = [path.stem for path in BANK_DIR.glob("*.json")]
-    if not bank_names:
-        bank_names = [SEED_BANK_ID]
-    return sorted(set([SEED_BANK_ID] + bank_names))
+    return sorted(set([SEED_BANK_ID] + get_memory_bank_names()))
 
 
 def seed_demo_data() -> None:
@@ -431,16 +588,41 @@ def generate_incident_plan(memory_text: str, error_log: str, service: str | None
 
 def normalize_recall_response(response: Any) -> list[dict[str, str]]:
     if isinstance(response, dict):
-        return list(response.get("results", []) or [])
-    values = getattr(response, "results", None)
-    if values is None and hasattr(response, "model_dump"):
+        payload = response
+    elif hasattr(response, "model_dump"):
         try:
-            values = response.model_dump().get("results")
+            payload = response.model_dump()
         except Exception:
-            values = None
-    if values is None:
+            return []
+    else:
+        payload = {"results": getattr(response, "results", None)}
+    values = payload.get("results")
+    if not values:
         return []
-    return list(values)
+    normalized: list[dict[str, str]] = []
+    for value in values:
+        if isinstance(value, dict):
+            item = value
+        elif hasattr(value, "model_dump"):
+            item = value.model_dump()
+        else:
+            item = {"text": getattr(value, "text", ""), "type": getattr(value, "type", "")}
+        text = str(item.get("text", "")).strip()
+        if text:
+            normalized.append({"text": text, "type": str(item.get("type") or item.get("context") or "incident")})
+    return normalized
+
+
+def render_storage_status(memory_client: MemoryClient, action: str) -> None:
+    if memory_client.remote_error:
+        st.warning(
+            f"{action} is safe in local SQLite, but Hindsight sync is unavailable: "
+            f"{memory_client.remote_error}"
+        )
+    elif memory_client.use_real:
+        st.caption(f"{action} is stored in SQLite and synced with Hindsight.")
+    else:
+        st.caption(f"{action} is stored in local SQLite. Hindsight sync is not configured.")
 
 
 def render_solver() -> None:
@@ -466,6 +648,7 @@ def render_solver() -> None:
 
         with st.spinner("Recalling past incidents from Hindsight…"):
             recall_response = memory_client.recall(bank_id, f"{service} {error_log}".strip())
+        render_storage_status(memory_client, "Incident history")
 
         memory_records = normalize_recall_response(recall_response)
         memory_text = "\n\n".join(item.get("text", "") for item in memory_records) if memory_records else "No relevant history"
@@ -505,15 +688,17 @@ def render_solver() -> None:
         fb_cols = st.columns(2)
         with fb_cols[0]:
             if st.button("👍 It worked", use_container_width=True):
-                submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "WORKED", feedback_note)
+                feedback_client = submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "WORKED", feedback_note)
                 st.success("Thanks — that outcome was saved into memory.")
+                render_storage_status(feedback_client, "Feedback")
         with fb_cols[1]:
             if st.button("👎 It didn't work", use_container_width=True):
-                submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "FAILED", feedback_note)
+                feedback_client = submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "FAILED", feedback_note)
                 st.warning("The failed suggestion was retained so it is not repeated.")
+                render_storage_status(feedback_client, "Feedback")
 
 
-def submit_feedback(bank_id: str, error_log: str, service: str, plan: str, outcome: str, note: str) -> None:
+def submit_feedback(bank_id: str, error_log: str, service: str, plan: str, outcome: str, note: str) -> MemoryClient:
     memory_client = get_memory_client()
     memory_client.ensure_bank(bank_id)
     summary = (
@@ -526,6 +711,7 @@ def submit_feedback(bank_id: str, error_log: str, service: str, plan: str, outco
         update_bank_stats(bank_id, "worked")
     else:
         update_bank_stats(bank_id, "failed")
+    return memory_client
 
 
 def render_teach_resolution() -> None:
@@ -551,6 +737,7 @@ def render_teach_resolution() -> None:
         )
         memory_client.retain(bank_id, content, "production incident post-mortem", utc_now_iso())
         st.success("Resolution stored. Future analyses can use this memory.")
+        render_storage_status(memory_client, "Resolution")
 
 
 def render_insights() -> None:
@@ -571,6 +758,7 @@ def render_insights() -> None:
         insight = memory_client.reflect(bank_id, f"{service_focus.strip()} {query}".strip())
         st.markdown("### Insight")
         st.write(insight)
+        render_storage_status(memory_client, "Insight")
 
 
 def render_sidebar() -> None:
@@ -578,6 +766,10 @@ def render_sidebar() -> None:
     seed_demo_data()
     bank_names = read_bank_names()
     st.sidebar.caption("Persistent memory for resilient incident response")
+    storage_client = get_memory_client()
+    st.sidebar.caption(
+        "Storage: SQLite + Hindsight" if storage_client.use_real else "Storage: local SQLite"
+    )
     active_bank = st.sidebar.selectbox("Memory bank", bank_names, index=bank_names.index(SEED_BANK_ID) if SEED_BANK_ID in bank_names else 0)
     st.session_state["active_bank"] = active_bank
 

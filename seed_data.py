@@ -3,27 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 from datetime import datetime, timezone
-from pathlib import Path
+
+from app import DATABASE_PATH, save_bank_records
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def get_bank_records(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, list) else []
-    except json.JSONDecodeError:
-        return []
-
-
-def save_bank_records(path: Path, records: list[dict]) -> None:
-    path.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
 def build_seed_memories() -> list[str]:
@@ -48,11 +34,6 @@ def main() -> None:
     parser.add_argument("--bank-id", default="devops-incidents", help="Target memory bank ID.")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent
-    bank_dir = root / ".incidentmind" / "banks"
-    bank_dir.mkdir(parents=True, exist_ok=True)
-    bank_file = bank_dir / f"{args.bank_id}.json"
-
     records = []
     for idx, memory in enumerate(build_seed_memories(), start=1):
         records.append(
@@ -65,8 +46,8 @@ def main() -> None:
             }
         )
 
-    save_bank_records(bank_file, records)
-    print(f"Seeded {len(records)} incidents into {args.bank_id} at {bank_file}")
+    save_bank_records(args.bank_id, records)
+    print(f"Seeded {len(records)} incidents into {args.bank_id} at {DATABASE_PATH}")
 
 
 if __name__ == "__main__":

@@ -9,14 +9,15 @@ IncidentMind is an on-call AI incident-response copilot that learns from every o
 - Teach a resolution: save a new incident resolution and failed steps into memory
 - Insights: ask pattern questions across the active memory bank
 - Dashboard: track memory usage, incident counts, and fix success rate
+- Durable local storage: every memory is stored in SQLite and synced to Hindsight when available
 
 ## Tech stack
 
 - Python 3.10+
 - Streamlit
-- Groq
+- Gemini (`google-genai`)
 - Hindsight memory client
-- Local JSON fallback for demo/offline usage
+- SQLite local memory database for restart-safe storage and offline usage
 
 ## Quick start
 
@@ -40,16 +41,18 @@ IncidentMind is an on-call AI incident-response copilot that learns from every o
    streamlit run app.py
    ```
 
-4. Optional: seed the default bank manually:
+4. Optional: seed a bank manually:
 
    ```bash
-   python seed_data.py
+   python seed_data.py --bank-id devops-incidents
    ```
+
+Memories and bank names are stored in `.incidentmind/memory.sqlite3`. Existing JSON memories in `.incidentmind/banks/` are imported automatically once. When Hindsight is configured, locally saved memories are synced during the next bank operation; if Hindsight is unavailable, they remain in SQLite and the app displays the sync status. Keep the SQLite database on the same machine to preserve local data. Runtime database and counter files are excluded from Git; the checked-in JSON bank remains as a one-time import source.
 
 ## Environment variables
 
-- `GROQ_API_KEY`: Groq authentication key
-- `GROQ_MODEL`: LLM model override, default `qwen/qwen3-32b`
+- `GEMINI_API_KEY`: Gemini authentication key
+- `GEMINI_MODEL`: LLM model override, default `gemini-3.8-flash`
 - `HINDSIGHT_API_KEY`: Hindsight API key
 - `HINDSIGHT_API_URL`: Hindsight endpoint, default `https://api.hindsight.vectorize.io`
 
