@@ -1,0 +1,6 @@
+streamlit
+google-genai
+python-dotenv
+requests
+hindsight-api
+hindsight-client
