@@ -1,0 +1,9 @@
+{
+  "devops-incidents": {
+    "memories_stored": 0,
+    "incidents_analyzed": 1,
+    "solved_with_memory": 0,
+    "worked": 0,
+    "failed": 0
+  }
+}

@@ -1,6 +1,4 @@
 streamlit
-google-genai
 python-dotenv
-requests
-hindsight-api
+groq
 hindsight-client

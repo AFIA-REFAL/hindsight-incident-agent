@@ -1,0 +1,86 @@
+[
+  {
+    "id": "seed-1",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'payments-api'. Error: DB unreachable after a failover; after restarting the DB listener, the issue persisted. Resolution: remove stale firewall rule and restore the primary DB route; this fix did NOT help: restarting the db listener. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-2",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'payments-api'. Error: timeout from checkout API to payments. Resolution: flush stale Redis connection pool and add health checks; what did NOT help: increasing the DB max connections. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-3",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'search-service'. Error: OOM warning after deploy; heap usage grew until selectors timed out. Resolution: reduce query cache size and enforce index refresh; what did NOT help: heap bump alone. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-4",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'search-service'. Error: 503s during indexing spike. Resolution: temporarily disable deep search on hot paths; what did NOT help: adding more workers without cache tuning. Outcome: FAILED."
+  },
+  {
+    "id": "seed-5",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'auth-service'. Error: 502 after deploy, login latency spiked. Resolution: rollback the auth worker image and restore env config; what did NOT help: rolling forward to a hotfix without config sync. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-6",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'auth-service'. Error: JWT validation timeout during peak load. Resolution: add a circuit break on downstream IDP; what did NOT help: scaling only the API pods. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-7",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'checkout-web'. Error: disk full on web-02. Resolution: rotate logs and clear debug output; what did NOT help: rebooting the app server without cleaning the partition. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-8",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'checkout-web'. Error: rendering error on mobile checkout. Resolution: disable debug flag and rehydrate the static asset cache; what did NOT help: purging CDN cache without disabling the noisy logs. Outcome: FAILED."
+  },
+  {
+    "id": "seed-9",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'payments-api'. Error: Elasticsearch 429s causing invoice jobs to stall. Resolution: increase queue timeout and throttle indexing; what did NOT help: forcing a full reconnect loop. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-10",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'search-service'. Error: Redis connection storm after cache invalidation. Resolution: reduce TTL and add backoff; what did NOT help: clearing all cache entries at once. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-11",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'auth-service'. Error: intermittent 401s after token rotation. Resolution: sync secret version and rotate the public key; what did NOT help: short TTL reissue without reloading the gateway. Outcome: SUCCESS."
+  },
+  {
+    "id": "seed-12",
+    "bank_id": "devops-incidents",
+    "context": "production incident post-mortem",
+    "timestamp": "2026-09-28T15:29:47Z",
+    "content": "Incident on service 'checkout-web'. Error: browser hydration stuck after release. Resolution: rollback frontend JS bundle and restore stable asset fingerprint; what did NOT help: toggling feature flags without clearing stale builds. Outcome: SUCCESS."
+  }
+]
