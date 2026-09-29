@@ -2,4 +2,4 @@ Flask
 markdown-it-py
 python-dotenv
 openai
-hindsight-client
+hindsight-clien
