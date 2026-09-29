@@ -1,5 +1,5 @@
 Flask
 markdown-it-py
 python-dotenv
-google-genai
+openai
 hindsight-client

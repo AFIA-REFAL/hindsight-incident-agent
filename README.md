@@ -15,7 +15,7 @@ IncidentMind is an on-call AI incident-response copilot that learns from every o
 
 - Python 3.10+
 - Flask
-- Gemini (`google-genai`)
+- OpenRouter (OpenAI-compatible API)
 - Hindsight memory client
 - SQLite local memory database for restart-safe storage and offline usage
 
@@ -51,8 +51,8 @@ Memories and bank names are stored in `.incidentmind/memory.sqlite3`. Existing J
 
 ## Environment variables
 
-- `GEMINI_API_KEY`: Gemini authentication key
-- `GEMINI_MODEL`: LLM model override, default `gemini-3.8-flash`
+- `OPENROUTER_API_KEY`: OpenRouter API key
+- `OPENROUTER_MODEL`: model override, default `openrouter/free`
 - `HINDSIGHT_API_KEY`: Hindsight API key
 - `HINDSIGHT_API_URL`: Hindsight endpoint, default `https://api.hindsight.vectorize.io`
 

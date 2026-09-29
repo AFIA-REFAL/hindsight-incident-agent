@@ -10,6 +10,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import local
 from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
@@ -18,9 +19,9 @@ from markupsafe import Markup
 from dotenv import load_dotenv
 
 try:
-    from google import genai
+    from openai import OpenAI
 except Exception:  # pragma: no cover - optional dependency for offline demo mode
-    genai = None
+    OpenAI = None
 
 try:
     from hindsight_client import Hindsight
@@ -473,10 +474,11 @@ class MemoryClient:
 
 
 def get_memory_client() -> MemoryClient:
-    global _memory_client
-    if _memory_client is None:
-        _memory_client = MemoryClient()
-    return _memory_client
+    memory_client = getattr(_memory_clients, "client", None)
+    if memory_client is None:
+        memory_client = MemoryClient()
+        _memory_clients.client = memory_client
+    return memory_client
 
 
 def strip_think_blocks(text: str) -> str:
@@ -521,13 +523,13 @@ def seed_demo_data() -> None:
     )
 
 
-def get_gemini_client() -> Any:
-    if genai is None:
-        raise RuntimeError("The Google GenAI SDK is not installed. Run pip install -r requirements.txt.")
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+def get_openrouter_client() -> Any:
+    if OpenAI is None:
+        raise RuntimeError("The OpenAI SDK is not installed. Run pip install -r requirements.txt.")
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("Missing GEMINI_API_KEY in your environment. Add it to .env.")
-    return genai.Client(api_key=api_key)
+        raise RuntimeError("Missing OPENROUTER_API_KEY in your environment. Add it to .env.")
+    return OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
 
 
 def confidence_from_memory_count(count: int) -> str:
@@ -559,28 +561,28 @@ def build_solver_prompt(memory_text: str, error_log: str, service: str | None) -
 
 
 def generate_incident_plan(memory_text: str, error_log: str, service: str | None) -> str:
-    client = get_gemini_client()
-    response = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
-        contents=build_solver_prompt(memory_text, error_log, service),
-        config={"temperature": 0.2},
+    client = get_openrouter_client()
+    response = client.chat.completions.create(
+        model=os.getenv("OPENROUTER_MODEL", "openrouter/free"),
+        messages=[{"role": "user", "content": build_solver_prompt(memory_text, error_log, service)}],
+        temperature=0.2,
     )
-    text = getattr(response, "text", None) or ""
+    text = response.choices[0].message.content or ""
     return strip_think_blocks(text) or "No solution generated."
 
 
 def format_plan_error(error: Exception) -> tuple[str, str]:
     error_text = str(error).lower()
-    status_code = getattr(error, "status_code", None)
-    if status_code == 429 or "resource_exhausted" in error_text or "quota" in error_text:
+    status_code = getattr(error, "status_code", None) or getattr(error, "status", None)
+    if status_code == 429 or "rate_limit" in error_text or "quota" in error_text:
         return (
-            "Gemini request quota reached. Incident history was recalled successfully, "
-            "but plan generation is temporarily unavailable. Wait for the quota to reset, "
-            "reduce request volume, or check your Gemini API quota and billing.",
-            "Plan unavailable. Review the recalled history above and retry after the quota refreshes.",
+            "OpenRouter's free-model rate limit was reached. Incident history was recalled "
+            "successfully, but plan generation is temporarily unavailable. Retry later or "
+            "choose another available model in OPENROUTER_MODEL.",
+            "Plan unavailable. Review the recalled history above and retry later.",
         )
     return (
-        "Gemini could not generate a plan. Check your API key, configured model, and Gemini API availability.",
+        "OpenRouter could not generate a plan. Check your API key, configured model, and model availability.",
         "Plan unavailable. Review the recalled history above and try again later.",
     )
 
@@ -633,11 +635,19 @@ QUESTION_OPTIONS = [
     "Which fixes repeatedly failed?",
     "Which service is least reliable?",
 ]
-_memory_client: MemoryClient | None = None
+_memory_clients = local()
 _analysis_results: dict[str, dict[str, Any]] = {}
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
-markdown_renderer = MarkdownIt("commonmark", {"html": False, "breaks": True})
+markdown_renderer = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable("table")
+
+
+@app.teardown_appcontext
+def close_request_memory_client(_error: BaseException | None) -> None:
+    memory_client = getattr(_memory_clients, "client", None)
+    if memory_client is not None:
+        del _memory_clients.client
+        memory_client.close()
 
 
 def active_bank() -> str:

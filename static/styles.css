@@ -191,6 +191,10 @@ textarea.control { resize: vertical; line-height: 1.65; }
 .insight-quote pre { max-width: 100%; padding: 13px; overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: white; }
 .insight-quote pre code { padding: 0; background: none; }
 .insight-quote blockquote { margin: 12px 0; padding: 2px 0 2px 14px; border-left: 2px solid #d8dfd6; color: #717b71; }
+.insight-quote table { width: 100%; margin: 12px 0 18px; border-collapse: collapse; table-layout: fixed; font-size: 12px; line-height: 1.55; }
+.insight-quote th, .insight-quote td { padding: 9px 11px; border-bottom: 1px solid #e4e9e1; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.insight-quote th { background: #eef2ec; color: #3d4b40; font-size: 11px; font-weight: 700; }
+.insight-quote tr:last-child td { border-bottom: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%); }
 
 @media (max-width: 1020px) {

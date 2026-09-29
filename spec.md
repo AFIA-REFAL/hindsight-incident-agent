@@ -115,8 +115,8 @@ Seeded memories are not counted in "stored" because they are inserted by `seed_d
               recall / retain / reflect    │ chat completion
                             │              │
                  ┌──────────▼───────┐  ┌───▼──────────┐
-                 │    Hindsight     │  │  Gemini LLM  │
-                 │ (memory banks)   │  │ google-genai │
+                 │    Hindsight     │  │ OpenRouter   │
+                 │ (memory banks)   │  │ openai SDK   │
                  └──────────────────┘  └──────────────┘
                             │
                       stats.json (local counters)
@@ -129,23 +129,23 @@ Seeded memories are not counted in "stored" because they are inserted by `seed_d
 | `templates/` and `static/` | Responsive web interface and styles |
 | `seed_data.py` | One-time synthetic data loader |
 | Hindsight (`hindsight-client`) | Persistent memory: retain, recall, reflect |
-| Gemini (`google-genai`) | Incident plan generation |
+| OpenRouter (OpenAI-compatible API) | Incident plan generation |
 | `stats.json` | Local per-bank dashboard counters |
 
 ### 4.2 Tech stack
 - Python 3.10+
 - Flask (UI)
 - `hindsight-client` (memory SDK)
-- `google-genai` (LLM SDK)
+- `openai` (OpenRouter-compatible SDK)
 - `python-dotenv` (config)
 
 ### 4.3 Configuration (`.env`)
 | Variable | Purpose | Default |
 |---|---|---|
-| `GEMINI_API_KEY` | Gemini authentication | none (required) |
+| `OPENROUTER_API_KEY` | OpenRouter authentication | none (required) |
 | `HINDSIGHT_API_KEY` | Hindsight authentication | none (required) |
 | `HINDSIGHT_API_URL` | Hindsight endpoint | `https://api.hindsight.vectorize.io` |
-| `GEMINI_MODEL` | LLM model override | `gemini-3.8-flash` |
+| `OPENROUTER_MODEL` | LLM model override | `openrouter/free` |
 
 ---
 
@@ -234,7 +234,7 @@ Analysis results are held by the Flask process for feedback submission and are r
 | Area | Requirement |
 |---|---|
 | Performance | Recall and LLM response within a few seconds; demo loop under 60s |
-| Reliability | Hindsight and Gemini calls are wrapped in try/except with a visible UI error |
+| Reliability | Hindsight and OpenRouter calls are wrapped in try/except with a visible UI error |
 | Security | Keys in `.env`, excluded via `.gitignore`; no secrets in the repo |
 | Portability | Runs locally with `python app.py`; deployable to a Python web host |
 | Maintainability | Flask routes and templates keep UI separate from shared incident and memory logic |
@@ -274,7 +274,7 @@ Closing line: "Every outage teaches something. IncidentMind makes sure it is nev
 | Hindsight retain processing delay | Seed data early; wait 30 to 60s before recording |
 | SDK or auth argument differences | Client init falls back to no `api_key`; verify against the Hindsight docs |
 | `reflect` response shape differs | Uses `.text` with `str(res)` fallback; inspect the object if output looks odd |
-| Gemini model unavailable or renamed | Override via `GEMINI_MODEL` |
+| OpenRouter free model unavailable or rate-limited | Retry later or override via `OPENROUTER_MODEL` |
 | LLM hallucinating history | Strict system prompt plus recalled memory shown beside the answer |
 | Weak recall on vague queries | Include service name in the query; keep seed data specific |
 | Scope creep | Ship the MVP (FR-1 to FR-3) first, then add FR-4 and FR-5 |
@@ -287,7 +287,7 @@ These were not confirmed against live services at build time and should be check
 1. Hindsight cloud base URL and the exact client authentication argument.
 2. `retain` accepts `timestamp` as an ISO string in the installed client version.
 3. `reflect` returns an object with a `.text` attribute.
-4. The configured Gemini model is available to the project's API key.
+4. The configured OpenRouter model is available to the project's API key.
 
 ---
 
