@@ -14,7 +14,7 @@
 
 ## 🚨 The Problem
 
-At 3 AM, an alert fires. Somewhere in a wiki, a Slack thread, or an engineer's head, the fix already exists, but nobody can find it. Worse, the **failed fixes** are rarely written down, so teams keep repeating them.
+At 3 AM, an alert fires. Somewhere in a wiki, a Slack thread, or an engineer's head, the fix already exists but nobody can find it. Worse, the **failed fixes** are rarely written down, so teams keep repeating them.
 
 ## 💡 The Solution
 
