@@ -574,6 +574,12 @@ def generate_incident_plan(memory_text: str, error_log: str, service: str | None
 def format_plan_error(error: Exception) -> tuple[str, str]:
     error_text = str(error).lower()
     status_code = getattr(error, "status_code", None) or getattr(error, "status", None)
+    if status_code == 401 or "authenticationerror" in error_text or "user not found" in error_text:
+        return (
+            "OpenRouter rejected the API key (401). Create or copy a valid key from your OpenRouter account, "
+            "set OPENROUTER_API_KEY in .env, and restart the app.",
+            "Plan unavailable because OpenRouter authentication failed. Update the API key and retry.",
+        )
     if status_code == 429 or "rate_limit" in error_text or "quota" in error_text:
         return (
             "OpenRouter's free-model rate limit was reached. Incident history was recalled "
