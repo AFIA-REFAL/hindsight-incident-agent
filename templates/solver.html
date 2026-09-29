@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Incident solver{% endblock %}
+{% block breadcrumb %}Incident solver{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><div class="eyebrow"><span class="eyebrow-line"></span> MEMORY-ASSISTED RESPONSE</div><h1>Incident solver</h1><p>Bring an alert. Give your team the benefit of what it has already learned.</p></div>
+  <div class="heading-badge"><span class="status-dot {% if storage_error %}status-warning{% elif storage_label == 'SQLite + Hindsight' %}status-connected{% endif %}"></span>{{ storage_label }}</div>
+</div>
+
+<div class="solver-grid">
+  <section class="panel intake-panel">
+    <div class="panel-heading"><div><span class="step-index">01</span><h2>Incoming incident</h2></div><span class="panel-kicker">NEW ANALYSIS</span></div>
+    <form action="{{ url_for('analyze') }}" method="post" class="form-stack">
+      <label for="sample-alert">Start with a sample</label>
+      <select id="sample-alert" class="control" onchange="document.getElementById('error-log').value = this.value">
+        <option value="">Choose a sample alert</option>
+        {% for alert in sample_alerts %}<option value="{{ alert }}">{{ alert }}</option>{% endfor %}
+      </select>
+      <label for="service">Service <span class="optional">OPTIONAL</span></label>
+      <input id="service" class="control" name="service" value="{{ analysis.service if analysis else '' }}" placeholder="e.g. payments-api">
+      <label for="error-log">Alert or error log <span class="required">REQUIRED</span></label>
+      <textarea id="error-log" class="control log-input" name="error_log" required placeholder="Paste the alert, traceback, or relevant log lines…">{{ analysis.error_log if analysis else '' }}</textarea>
+      <div class="form-footer"><span class="form-hint">Analysis uses saved incidents from <strong>{{ active_bank }}</strong>.</span><button class="button button-primary" type="submit"><span>Analyze incident</span><span aria-hidden="true">↗</span></button></div>
+    </form>
+  </section>
+  <aside class="memory-aside">
+    <div class="memory-note"><div class="note-glyph">◉</div><div class="note-label">THE LEARNING LOOP</div><p>Every outcome makes the next response more informed. Failed fixes stay visible, so they are less likely to be repeated.</p><a href="{{ url_for('teach') }}">Add a resolution <span>→</span></a></div>
+    <div class="aside-stat"><div class="aside-stat-top"><span>Memory coverage</span><span class="tiny-spark">↗</span></div><strong>{{ stats.get('solved_with_memory', 0) }}<small> / {{ stats.get('incidents_analyzed', 0) }}</small></strong><p>analyses informed by history</p></div>
+  </aside>
+</div>
+
+{% if analysis %}
+<section class="results-section" id="results">
+  <div class="results-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> RESPONSE BRIEF</div><h2>Analysis results</h2></div>
+  {% if analysis.memory_count == 0 %}<span class="confidence confidence-low"><i></i> No history found</span>{% elif analysis.memory_count <= 2 %}<span class="confidence confidence-mid"><i></i> Partial memory · {{ analysis.memory_count }}</span>{% else %}<span class="confidence confidence-high"><i></i> Strong match · {{ analysis.memory_count }}</span>{% endif %}</div>
+  <div class="result-grid">
+    <article class="result-panel recalled-panel"><div class="result-title"><div><span class="result-icon memory-icon">↺</span><h3>Relevant history</h3></div><span class="result-count">{{ analysis.memory_count }} MATCH{% if analysis.memory_count != 1 %}ES{% endif %}</span></div>
+      {% if analysis.memories %}<div class="memory-list">{% for item in analysis.memories %}<div class="memory-item"><div class="memory-item-meta"><span>INCIDENT {{ "%02d"|format(loop.index) }}</span><span>{{ item.get('type', 'TEAM MEMORY')|upper }}</span></div><p>{{ item.get('text', '') }}</p></div>{% endfor %}</div>{% else %}<div class="empty-memory"><span class="empty-orbit">◌</span><strong>No relevant history yet</strong><p>This looks new to the active memory bank. Keep the first recommendation conservative, then teach the team what worked.</p><a href="{{ url_for('teach') }}">Teach a resolution →</a></div>{% endif %}
+    </article>
+    <article class="result-panel plan-panel"><div class="result-title"><div><span class="result-icon plan-icon">✳</span><h3>Suggested action plan</h3></div><span class="ai-label">INCIDENTMIND</span></div>
+      {% if analysis.plan_error %}<div class="inline-warning">{{ analysis.plan_error }}</div>{% endif %}<div class="plan-copy">{{ analysis.plan }}</div>
+      {% if analysis.plan_error %}<div class="feedback-locked">Feedback is unavailable because no action plan was generated.</div>{% elif not analysis.feedback_submitted %}<form action="{{ url_for('feedback') }}" method="post" class="feedback-form"><input type="hidden" name="analysis_id" value="{{ analysis.id }}"><label for="feedback-note">What actually happened? <span class="optional">OPTIONAL</span></label><input id="feedback-note" name="note" class="control" placeholder="Add the real cause or outcome…"><div class="feedback-actions"><button class="button button-success" type="submit" name="outcome" value="WORKED">✓ It worked</button><button class="button button-danger" type="submit" name="outcome" value="FAILED">× It didn’t work</button></div></form>{% else %}<div class="feedback-locked">Outcome recorded. This analysis has already been added to memory.</div>{% endif %}
+    </article>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

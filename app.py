@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import streamlit as st
+from flask import Flask, flash, redirect, render_template, request, session, url_for
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 from dotenv import load_dotenv
 
 try:
@@ -42,93 +44,6 @@ SAMPLE_ALERTS = [
 
 SEED_BANK_ID = "devops-incidents"
 DEFAULT_HINDSIGHT_URL = os.getenv("HINDSIGHT_API_URL") or os.getenv("HINDSIGHT_BASE_URL") or "https://api.hindsight.vectorize.io"
-
-
-def local_css() -> None:
-    st.markdown(
-        """
-        <style>
-        :root {
-            --bg: #07111f;
-            --panel: #0d1b2a;
-            --panel-soft: rgba(19, 35, 55, 0.8);
-            --card: rgba(12, 22, 36, 0.9);
-            --primary: #67e8f9;
-            --secondary: #8b5cf6;
-            --success: #34d399;
-            --warning: #fbbf24;
-            --danger: #f87171;
-            --text: #e2e8f0;
-            --muted: #a5b4c7;
-            --border: rgba(148, 163, 184, 0.2);
-        }
-        html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
-            background: radial-gradient(circle at top left, rgba(103,232,249,0.12), transparent 28%),
-                        radial-gradient(circle at bottom right, rgba(139,92,246,0.18), transparent 32%),
-                        var(--bg);
-            color: var(--text);
-        }
-        [data-testid="stSidebar"] {
-            background: rgba(8, 15, 25, 0.94);
-            border-right: 1px solid var(--border);
-        }
-        .stTabs [role="tablist"] {
-            gap: 10px;
-            margin-bottom: 1rem;
-        }
-        .stTabs [role="tab"] {
-            border-radius: 12px;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 0.5rem 1rem;
-        }
-        .stTabs [role="tab"][aria-selected="true"] {
-            background: linear-gradient(135deg, rgba(103,232,249,0.2), rgba(139,92,246,0.25));
-            border-color: rgba(103,232,249,0.55);
-        }
-        div[data-testid="stMetricContainer"] {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 0.6rem 0.8rem;
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 3rem;
-        }
-        .top-hero {
-            background: linear-gradient(135deg, rgba(103,232,249,0.12), rgba(139,92,246,0.18));
-            border: 1px solid rgba(103,232,249,0.3);
-            border-radius: 20px;
-            padding: 1.2rem 1.3rem;
-            margin-bottom: 1.2rem;
-        }
-        .pill {
-            display: inline-block;
-            background: rgba(52, 211, 153, 0.12);
-            color: var(--success);
-            border: 1px solid rgba(52, 211, 153, 0.35);
-            border-radius: 999px;
-            padding: 0.25rem 0.7rem;
-            font-size: 0.74rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-        }
-        .card {
-            background: rgba(15, 23, 42, 0.75);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 1rem;
-        }
-        .css-1d391kg, .css-12oz5g7 {
-            color: var(--text);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def utc_now_iso() -> str:
@@ -356,20 +271,86 @@ class LocalMemory:
         records = get_bank_records(bank_id)
         if not records:
             return "No stored incidents yet. Teach a resolution to create the first pattern."
-        service_map: dict[str, int] = {}
-        failed_fixes = 0
+        service_stats: dict[str, dict[str, int]] = {}
+        failed_fixes: dict[str, int] = {}
+        root_cause_terms = {
+            "network and connectivity": ("firewall", "route", "unreachable", "connection", "connectivity"),
+            "cache and resource pressure": ("cache", "redis", "oom", "heap", "memory", "timeout", "queue", "elasticsearch"),
+            "deployment and configuration": ("deploy", "config", "secret", "token", "rollback", "version"),
+            "disk and log management": ("disk", "log", "partition", "debug output"),
+        }
+        root_cause_counts = {category: 0 for category in root_cause_terms}
         for rec in records:
-            content = rec.get("content", "")
+            content = str(rec.get("content", ""))
+            lowered_content = content.lower()
             match = re.search(r"service '([^']+)'|service ([A-Za-z0-9\-]+)", content, flags=re.I)
             if match:
                 service = match.group(1) or match.group(2)
-                service_map[service] = service_map.get(service, 0) + 1
-            if "did not help" in content.lower() or "did NOT help" in content.lower():
-                failed_fixes += 1
-        top_service = max(service_map.items(), key=lambda item: item[1], default=("unknown", 0))[0]
+                stats = service_stats.setdefault(service, {"incidents": 0, "failed": 0})
+                stats["incidents"] += 1
+                outcome = re.search(r"outcome:\s*(SUCCESS|FAILED)", content, flags=re.I)
+                if outcome and outcome.group(1).upper() == "FAILED":
+                    stats["failed"] += 1
+            for failed_fix in re.findall(
+                r"(?:what did not help|this fix did not help|did not help)\s*:?\s*([^.;]+)",
+                content,
+                flags=re.I,
+            ):
+                normalized_fix = failed_fix.strip().rstrip(",")
+                if normalized_fix:
+                    failed_fixes[normalized_fix] = failed_fixes.get(normalized_fix, 0) + 1
+            for category, terms in root_cause_terms.items():
+                if any(term in lowered_content for term in terms):
+                    root_cause_counts[category] += 1
+
+        lowered_query = query.lower()
+        if any(term in lowered_query for term in ("failed", "did not help", "didn't help")):
+            repeated_fixes = sorted(failed_fixes.items(), key=lambda item: item[1], reverse=True)[:3]
+            if not repeated_fixes:
+                return "No explicitly failed recovery steps are recorded in this memory bank."
+            details = "; ".join(
+                f"{fix} ({count} record{'s' if count != 1 else ''})"
+                for fix, count in repeated_fixes
+            )
+            return f"Recorded unsuccessful recovery steps: {details}. Avoid repeating these without new evidence."
+
+        if any(term in lowered_query for term in ("least reliable", "reliability", "most unreliable")):
+            ranked_services = sorted(
+                service_stats.items(),
+                key=lambda item: (
+                    item[1]["failed"] / item[1]["incidents"] if item[1]["incidents"] else 0,
+                    item[1]["failed"],
+                    item[1]["incidents"],
+                ),
+                reverse=True,
+            )
+            if not ranked_services:
+                return "No service-level incident data is available in this memory bank."
+            service, stats = ranked_services[0]
+            failure_rate = round(stats["failed"] / stats["incidents"] * 100)
+            return (
+                f"By recorded outcomes, {service} has the highest failure rate: "
+                f"{stats['failed']} failed of {stats['incidents']} incidents ({failure_rate}%)."
+            )
+
+        recurring_categories = sorted(
+            ((category, count) for category, count in root_cause_counts.items() if count),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:3]
+        if recurring_categories:
+            summary = "; ".join(f"{category} ({count} records)" for category, count in recurring_categories)
+            return (
+                f"Recurring incident themes in this memory bank include {summary}. "
+                "These are text-based patterns; review the matching incidents to confirm root causes."
+            )
+
+        top_service = max(
+            service_stats.items(), key=lambda item: item[1]["incidents"], default=("unknown", {"incidents": 0})
+        )[0]
         if failed_fixes:
             return (
-                f"Recurring pattern: {top_service} has the most incident history and many entries explicitly record failed recovery steps. "
+                f"Recurring pattern: {top_service} has the most incident history and entries record failed recovery steps. "
                 "The strongest learning is to avoid repeated actions that were labeled as 'did NOT help'."
             )
         return (
@@ -491,9 +472,11 @@ class MemoryClient:
         return local_insight
 
 
-@st.cache_resource(on_release=lambda client: client.close())
 def get_memory_client() -> MemoryClient:
-    return MemoryClient()
+    global _memory_client
+    if _memory_client is None:
+        _memory_client = MemoryClient()
+    return _memory_client
 
 
 def strip_think_blocks(text: str) -> str:
@@ -586,6 +569,22 @@ def generate_incident_plan(memory_text: str, error_log: str, service: str | None
     return strip_think_blocks(text) or "No solution generated."
 
 
+def format_plan_error(error: Exception) -> tuple[str, str]:
+    error_text = str(error).lower()
+    status_code = getattr(error, "status_code", None)
+    if status_code == 429 or "resource_exhausted" in error_text or "quota" in error_text:
+        return (
+            "Gemini request quota reached. Incident history was recalled successfully, "
+            "but plan generation is temporarily unavailable. Wait for the quota to reset, "
+            "reduce request volume, or check your Gemini API quota and billing.",
+            "Plan unavailable. Review the recalled history above and retry after the quota refreshes.",
+        )
+    return (
+        "Gemini could not generate a plan. Check your API key, configured model, and Gemini API availability.",
+        "Plan unavailable. Review the recalled history above and try again later.",
+    )
+
+
 def normalize_recall_response(response: Any) -> list[dict[str, str]]:
     if isinstance(response, dict):
         payload = response
@@ -613,91 +612,6 @@ def normalize_recall_response(response: Any) -> list[dict[str, str]]:
     return normalized
 
 
-def render_storage_status(memory_client: MemoryClient, action: str) -> None:
-    if memory_client.remote_error:
-        st.warning(
-            f"{action} is safe in local SQLite, but Hindsight sync is unavailable: "
-            f"{memory_client.remote_error}"
-        )
-    elif memory_client.use_real:
-        st.caption(f"{action} is stored in SQLite and synced with Hindsight.")
-    else:
-        st.caption(f"{action} is stored in local SQLite. Hindsight sync is not configured.")
-
-
-def render_solver() -> None:
-    st.subheader("Incident Solver")
-    sample_alert = st.selectbox("Sample alert", SAMPLE_ALERTS, index=0)
-    service = st.text_input("Service name (optional)", value="")
-    error_log = st.text_area(
-        "Error log or alert text",
-        value=sample_alert,
-        height=220,
-        placeholder="Paste the alert, traceback, or error snippet here…",
-    )
-
-    run_button = st.button("Analyze incident", type="primary", use_container_width=True)
-    if run_button:
-        if not error_log.strip():
-            st.warning("Paste an error log before analyzing.")
-            return
-
-        bank_id = st.session_state.get("active_bank", SEED_BANK_ID)
-        memory_client = get_memory_client()
-        memory_client.ensure_bank(bank_id)
-
-        with st.spinner("Recalling past incidents from Hindsight…"):
-            recall_response = memory_client.recall(bank_id, f"{service} {error_log}".strip())
-        render_storage_status(memory_client, "Incident history")
-
-        memory_records = normalize_recall_response(recall_response)
-        memory_text = "\n\n".join(item.get("text", "") for item in memory_records) if memory_records else "No relevant history"
-        memory_count = len(memory_records)
-        st.session_state["last_memory_text"] = memory_text
-        st.session_state["last_plan_input"] = {"service": service, "error_log": error_log}
-        update_bank_stats(bank_id, "incidents_analyzed")
-        if memory_count > 0:
-            update_bank_stats(bank_id, "solved_with_memory")
-
-        st.markdown(f"<div class='pill'>Confidence: {confidence_from_memory_count(memory_count)}</div>", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        left, right = st.columns(2)
-        with left:
-            st.markdown("### Recalled memory")
-            if memory_records:
-                for idx, item in enumerate(memory_records, start=1):
-                    st.markdown(f"**Memory {idx}**")
-                    st.write(item.get("text", ""))
-            else:
-                st.info("No relevant history")
-
-        with right:
-            st.markdown("### Suggested action plan")
-            try:
-                with st.spinner("Generating the plan with Gemini…"):
-                    plan = generate_incident_plan(memory_text, error_log, service or None)
-                st.markdown(plan)
-                st.session_state["last_plan_text"] = plan
-            except Exception as exc:
-                st.error(f"Unable to generate the plan: {exc}")
-                st.session_state["last_plan_text"] = "Unable to generate a plan."
-
-        st.markdown("---")
-        feedback_note = st.text_input("Optional note", placeholder="What actually happened or the real cause?")
-        fb_cols = st.columns(2)
-        with fb_cols[0]:
-            if st.button("👍 It worked", use_container_width=True):
-                feedback_client = submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "WORKED", feedback_note)
-                st.success("Thanks — that outcome was saved into memory.")
-                render_storage_status(feedback_client, "Feedback")
-        with fb_cols[1]:
-            if st.button("👎 It didn't work", use_container_width=True):
-                feedback_client = submit_feedback(bank_id, error_log, service, st.session_state.get("last_plan_text", ""), "FAILED", feedback_note)
-                st.warning("The failed suggestion was retained so it is not repeated.")
-                render_storage_status(feedback_client, "Feedback")
-
-
 def submit_feedback(bank_id: str, error_log: str, service: str, plan: str, outcome: str, note: str) -> MemoryClient:
     memory_client = get_memory_client()
     memory_client.ensure_bank(bank_id)
@@ -714,113 +628,162 @@ def submit_feedback(bank_id: str, error_log: str, service: str, plan: str, outco
     return memory_client
 
 
-def render_teach_resolution() -> None:
-    st.subheader("Teach a Resolution")
-    with st.form("teach_resolution"):
-        service = st.text_input("Service", placeholder="payments-api")
-        error = st.text_area("Error or symptom", height=120, placeholder="DB unreachable after failover")
-        fix = st.text_area("What fixed it", height=150, placeholder="Rollback the worker and restore the DB route")
-        did_not_help = st.text_area("What did NOT help", height=120, placeholder="Restarting the DB listener, increasing heap, etc.")
-        outcome = st.selectbox("Outcome", ["SUCCESS", "FAILED"])
-        submitted = st.form_submit_button("Save memory", use_container_width=True)
-
-    if submitted:
-        if not service.strip() or not error.strip() or not fix.strip() or not did_not_help.strip():
-            st.warning("Service, error, fix, and what did not help are all required.")
-            return
-        bank_id = st.session_state.get("active_bank", SEED_BANK_ID)
-        memory_client = get_memory_client()
-        memory_client.ensure_bank(bank_id)
-        content = (
-            f"Incident on service '{service.strip()}'. Error: {error.strip()}. Resolution: {fix.strip()}. "
-            f"What did NOT help: {did_not_help.strip()}. Outcome: {outcome}."
-        )
-        memory_client.retain(bank_id, content, "production incident post-mortem", utc_now_iso())
-        st.success("Resolution stored. Future analyses can use this memory.")
-        render_storage_status(memory_client, "Resolution")
+QUESTION_OPTIONS = [
+    "What recurring root causes appear across incidents?",
+    "Which fixes repeatedly failed?",
+    "Which service is least reliable?",
+]
+_memory_client: MemoryClient | None = None
+_analysis_results: dict[str, dict[str, Any]] = {}
+app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
+markdown_renderer = MarkdownIt("commonmark", {"html": False, "breaks": True})
 
 
-def render_insights() -> None:
-    st.subheader("Insights")
-    question_options = [
-        "What recurring root causes appear across incidents?",
-        "Which fixes repeatedly failed?",
-        "Which service is least reliable?",
-    ]
-    question = st.selectbox("Sample question", question_options)
-    custom_question = st.text_input("Custom question", placeholder="What patterns do you want to review?")
-    service_focus = st.text_input("Service focus (optional)", placeholder="payments-api")
-    if st.button("Reflect", type="primary", use_container_width=True):
-        bank_id = st.session_state.get("active_bank", SEED_BANK_ID)
-        memory_client = get_memory_client()
-        memory_client.ensure_bank(bank_id)
-        query = (custom_question.strip() or question).strip()
-        insight = memory_client.reflect(bank_id, f"{service_focus.strip()} {query}".strip())
-        st.markdown("### Insight")
-        st.write(insight)
-        render_storage_status(memory_client, "Insight")
+def active_bank() -> str:
+    bank_id = session.get("active_bank", SEED_BANK_ID)
+    return bank_id if bank_id in read_bank_names() else SEED_BANK_ID
 
 
-def render_sidebar() -> None:
-    st.sidebar.title("IncidentMind")
-    seed_demo_data()
-    bank_names = read_bank_names()
-    st.sidebar.caption("Persistent memory for resilient incident response")
-    storage_client = get_memory_client()
-    st.sidebar.caption(
-        "Storage: SQLite + Hindsight" if storage_client.use_real else "Storage: local SQLite"
-    )
-    active_bank = st.sidebar.selectbox("Memory bank", bank_names, index=bank_names.index(SEED_BANK_ID) if SEED_BANK_ID in bank_names else 0)
-    st.session_state["active_bank"] = active_bank
-
-    if st.sidebar.button("Create fresh bank", use_container_width=True):
-        fresh_bank = f"demo-fresh-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-        get_memory_client().ensure_bank(fresh_bank)
-        st.session_state["active_bank"] = fresh_bank
-        st.sidebar.success(f"Created fresh bank: {fresh_bank}")
-        st.rerun()
-
-    stats = get_bank_stats(active_bank)
-    st.sidebar.markdown("### Learning dashboard")
-    metrics = [
-        ("Memories stored", stats.get("memories_stored", 0)),
-        ("Incidents analyzed", stats.get("incidents_analyzed", 0)),
-        ("Solved with memory", stats.get("solved_with_memory", 0)),
-    ]
-    for label, value in metrics:
-        st.sidebar.metric(label, value)
-
+def page_context() -> dict[str, Any]:
+    bank_id = active_bank()
+    memory_client = get_memory_client()
+    stats = get_bank_stats(bank_id)
     worked = stats.get("worked", 0)
     failed = stats.get("failed", 0)
-    total_attempts = worked + failed
-    success_rate = round((worked / total_attempts) * 100, 1) if total_attempts else 0.0
-    st.sidebar.metric("Fix success rate", f"{success_rate}%")
+    attempts = worked + failed
+    return {
+        "active_bank": bank_id,
+        "bank_names": read_bank_names(),
+        "stats": stats,
+        "success_rate": round(worked / attempts * 100, 1) if attempts else 0,
+        "storage_label": "SQLite + Hindsight" if memory_client.use_real else "Local SQLite",
+        "storage_error": memory_client.remote_error,
+    }
 
 
-def main() -> None:
-    st.set_page_config(page_title="IncidentMind", page_icon="🧠", layout="wide")
-    local_css()
-    render_sidebar()
-
-    st.markdown(
-        """
-        <div class='top-hero'>
-            <span class='pill'>Hindsight memory + Gemini</span>
-            <h2 style='margin: 0.6rem 0 0.2rem 0;'>IncidentMind</h2>
-            <p style='margin: 0; color: #cbd5e1;'>An on-call AI copilot that remembers every outage, warns against failed fixes, and improves over time.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+@app.get("/")
+def home() -> str:
+    seed_demo_data()
+    return render_template(
+        "solver.html",
+        **page_context(),
+        sample_alerts=SAMPLE_ALERTS,
+        analysis=None,
     )
 
-    solver_tab, teach_tab, insights_tab = st.tabs(["Incident Solver", "Teach a Resolution", "Insights"])
-    with solver_tab:
-        render_solver()
-    with teach_tab:
-        render_teach_resolution()
-    with insights_tab:
-        render_insights()
+
+@app.post("/analyze")
+def analyze() -> str:
+    error_log = request.form.get("error_log", "").strip()
+    service = request.form.get("service", "").strip()
+    if not error_log:
+        flash("Add an alert or error log before starting the analysis.", "error")
+        return redirect(url_for("home"))
+
+    bank_id = active_bank()
+    memory_client = get_memory_client()
+    memory_client.ensure_bank(bank_id)
+    memory_records = normalize_recall_response(
+        memory_client.recall(bank_id, f"{service} {error_log}".strip())
+    )
+    memory_text = "\n\n".join(item["text"] for item in memory_records) or "No relevant history"
+    update_bank_stats(bank_id, "incidents_analyzed")
+    if memory_records:
+        update_bank_stats(bank_id, "solved_with_memory")
+
+    try:
+        plan = generate_incident_plan(memory_text, error_log, service or None)
+        plan_error = None
+    except Exception as exc:
+        plan_error, plan = format_plan_error(exc)
+
+    analysis_id = uuid.uuid4().hex
+    analysis = {
+        "id": analysis_id,
+        "bank_id": bank_id,
+        "service": service,
+        "error_log": error_log,
+        "memories": memory_records,
+        "memory_count": len(memory_records),
+        "plan": plan,
+        "plan_error": plan_error,
+        "feedback_submitted": False,
+    }
+    _analysis_results[analysis_id] = analysis
+    return render_template("solver.html", **page_context(), sample_alerts=SAMPLE_ALERTS, analysis=analysis)
+
+
+@app.post("/feedback")
+def feedback() -> Any:
+    analysis = _analysis_results.get(request.form.get("analysis_id", ""))
+    outcome = request.form.get("outcome", "")
+    if not analysis or analysis["feedback_submitted"] or outcome not in {"WORKED", "FAILED"}:
+        flash("This analysis is no longer available for feedback.", "error")
+        return redirect(url_for("home"))
+    submit_feedback(
+        analysis["bank_id"], analysis["error_log"], analysis["service"],
+        analysis["plan"], outcome, request.form.get("note", ""),
+    )
+    analysis["feedback_submitted"] = True
+    flash("Outcome saved to incident memory.", "success")
+    return redirect(url_for("home"))
+
+
+@app.route("/teach", methods=["GET", "POST"])
+def teach() -> Any:
+    if request.method == "POST":
+        fields = {key: request.form.get(key, "").strip() for key in ("service", "error", "fix", "did_not_help")}
+        if not all(fields.values()):
+            flash("Complete each field before saving the resolution.", "error")
+        else:
+            bank_id = active_bank()
+            memory_client = get_memory_client()
+            memory_client.ensure_bank(bank_id)
+            content = (
+                f"Incident on service '{fields['service']}'. Error: {fields['error']}. "
+                f"Resolution: {fields['fix']}. What did NOT help: {fields['did_not_help']}. "
+                f"Outcome: {request.form.get('outcome', 'SUCCESS')}."
+            )
+            memory_client.retain(bank_id, content, "production incident post-mortem", utc_now_iso())
+            flash("Resolution added to the active incident memory.", "success")
+            return redirect(url_for("teach"))
+    return render_template("teach.html", **page_context())
+
+
+@app.route("/insights", methods=["GET", "POST"])
+def insights() -> str:
+    insight = None
+    insight_html = None
+    if request.method == "POST":
+        question = (request.form.get("custom_question", "").strip()
+                    or request.form.get("question", QUESTION_OPTIONS[0])).strip()
+        service_focus = request.form.get("service_focus", "").strip()
+        memory_client = get_memory_client()
+        bank_id = active_bank()
+        memory_client.ensure_bank(bank_id)
+        insight = memory_client.reflect(bank_id, f"{service_focus} {question}".strip())
+        insight_html = Markup(markdown_renderer.render(insight))
+    return render_template(
+        "insights.html", **page_context(), questions=QUESTION_OPTIONS,
+        insight=insight, insight_html=insight_html,
+    )
+
+
+@app.post("/banks")
+def select_bank() -> Any:
+    action = request.form.get("action")
+    if action == "create":
+        bank_id = f"demo-fresh-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        get_memory_client().ensure_bank(bank_id)
+        session["active_bank"] = bank_id
+        flash(f"Created fresh memory bank: {bank_id}", "success")
+    else:
+        requested_bank = request.form.get("bank_id", "")
+        if requested_bank in read_bank_names():
+            session["active_bank"] = requested_bank
+    return redirect(url_for("home"))
 
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1", port=int(os.getenv("PORT", "5000")))

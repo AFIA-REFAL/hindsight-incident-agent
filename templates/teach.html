@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Teach a resolution{% endblock %}
+{% block breadcrumb %}Teach a resolution{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> TEAM MEMORY</div><h1>Teach a resolution</h1><p>Capture the fix and the dead ends. Both are valuable operational knowledge.</p></div></div>
+<div class="teach-layout">
+  <section class="panel teach-panel"><div class="panel-heading"><div><span class="step-index">02</span><h2>Incident post-mortem</h2></div><span class="panel-kicker">SAVED TO {{ active_bank }}</span></div>
+    <form method="post" class="form-stack">
+      <div class="field-grid"><div><label for="service">Service <span class="required">REQUIRED</span></label><input class="control" id="service" name="service" required placeholder="e.g. payments-api"></div><div><label for="outcome">Outcome</label><select class="control" id="outcome" name="outcome"><option value="SUCCESS">Resolved successfully</option><option value="FAILED">Unresolved</option></select></div></div>
+      <label for="error">Error or symptom <span class="required">REQUIRED</span></label><textarea class="control short-textarea" id="error" name="error" required placeholder="What did the team observe? Include error messages or impact."></textarea>
+      <label for="fix">What fixed it <span class="required">REQUIRED</span></label><textarea class="control short-textarea" id="fix" name="fix" required placeholder="The recovery steps that made a difference."></textarea>
+      <label for="did-not-help">What did not help <span class="required">REQUIRED</span></label><textarea class="control short-textarea" id="did-not-help" name="did_not_help" required placeholder="Record attempted fixes that should not be repeated."></textarea>
+      <div class="form-footer"><span class="form-hint">Stored locally and synced to Hindsight when configured.</span><button class="button button-primary" type="submit">Save to memory <span aria-hidden="true">↗</span></button></div>
+    </form>
+  </section>
+  <aside class="teach-aside"><div class="principle-card"><span class="principle-mark">“</span><h3>Keep the scar tissue.</h3><p>A useful incident record preserves both what restored service and what consumed time without helping.</p><div class="principle-rule"></div><div class="principle-caption">A BETTER MEMORY, EVERY INCIDENT</div></div><div class="bank-summary"><span>ACTIVE MEMORY</span><strong>{{ active_bank }}</strong><p>{{ stats.get('memories_stored', 0) }} memories contributed by this workspace</p></div></aside>
+</div>
+{% endblock %}

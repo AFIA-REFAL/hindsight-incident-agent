@@ -14,7 +14,7 @@ IncidentMind is an on-call AI incident-response copilot that learns from every o
 ## Tech stack
 
 - Python 3.10+
-- Streamlit
+- Flask
 - Gemini (`google-genai`)
 - Hindsight memory client
 - SQLite local memory database for restart-safe storage and offline usage
@@ -38,7 +38,7 @@ IncidentMind is an on-call AI incident-response copilot that learns from every o
 3. Run the app:
 
    ```bash
-   streamlit run app.py
+   python app.py
    ```
 
 4. Optional: seed a bank manually:
@@ -66,7 +66,9 @@ Memories and bank names are stored in `.incidentmind/memory.sqlite3`. Existing J
 
 ## Repository structure
 
-- `app.py`: Streamlit UI and orchestration
+- `app.py`: Flask UI routes and incident orchestration
+- `templates/`: responsive incident solver, resolution, and insights screens
+- `static/styles.css`: application styling
 - `seed_data.py`: synthetic incident dataset loader for the seeded bank
 - `requirements.txt`: Python dependencies
 - `.env.example`: environment variable template

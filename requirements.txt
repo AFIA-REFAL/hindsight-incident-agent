@@ -1,4 +1,5 @@
-streamlit
+Flask
+markdown-it-py
 python-dotenv
 google-genai
 hindsight-client

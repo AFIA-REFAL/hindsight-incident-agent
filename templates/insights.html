@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Insights{% endblock %}
+{% block breadcrumb %}Insights{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> RELIABILITY INTELLIGENCE</div><h1>Patterns worth seeing</h1><p>Reflect across your incident history to uncover repeat causes and costly dead ends.</p></div></div>
+<div class="insights-layout">
+  <section class="panel insights-panel"><div class="panel-heading"><div><span class="step-index">03</span><h2>Ask your incident history</h2></div><span class="panel-kicker">{{ active_bank }}</span></div>
+    <form method="post" class="form-stack">
+      <label for="question">Explore a prompt</label><select class="control" id="question" name="question">{% for item in questions %}<option>{{ item }}</option>{% endfor %}</select>
+      <div class="input-divider"><span>OR ASK YOUR OWN</span></div>
+      <label for="custom-question">Your question <span class="optional">OPTIONAL</span></label><input class="control" id="custom-question" name="custom_question" placeholder="What patterns do you want to investigate?">
+      <label for="service-focus">Focus on a service <span class="optional">OPTIONAL</span></label><input class="control" id="service-focus" name="service_focus" placeholder="e.g. payments-api">
+      <div class="form-footer"><span class="form-hint">Reflection uses the active bank’s retained experience.</span><button class="button button-primary" type="submit">Find patterns <span aria-hidden="true">↗</span></button></div>
+    </form>
+  </section>
+  <aside class="insight-aside"><div class="insight-art"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><span class="art-center">✳</span><span class="art-dot dot-one"></span><span class="art-dot dot-two"></span><span class="art-dot dot-three"></span></div><div class="insight-aside-copy"><span class="panel-kicker">FROM INCIDENTS TO SIGNAL</span><p>Repeated failure is a pattern. A pattern is an opportunity to change the system.</p></div></aside>
+</div>
+{% if insight %}<section class="insight-result"><div class="insight-result-head"><div><div class="eyebrow"><span class="eyebrow-line"></span> REFLECTION</div><h2>What your history suggests</h2></div><span class="ai-label">{{ storage_label }}</span></div><div class="insight-quote">{{ insight_html }}</div></section>{% endif %}
+{% endblock %}

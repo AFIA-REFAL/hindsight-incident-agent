@@ -107,16 +107,16 @@ Seeded memories are not counted in "stored" because they are inserted by `seed_d
 
 ```
                      ┌──────────────────────────────┐
-                     │        Streamlit UI          │
+                     │         Flask UI            │
                      │ Solver | Teach | Insights    │
-                     │ Sidebar: bank + dashboard    │
+                     │ Navigation + dashboard       │
                      └──────┬──────────────┬────────┘
                             │              │
               recall / retain / reflect    │ chat completion
                             │              │
                  ┌──────────▼───────┐  ┌───▼──────────┐
-                 │    Hindsight     │  │   Groq LLM   │
-                 │ (memory banks)   │  │ qwen3-32b    │
+                 │    Hindsight     │  │  Gemini LLM  │
+                 │ (memory banks)   │  │ google-genai │
                  └──────────────────┘  └──────────────┘
                             │
                       stats.json (local counters)
@@ -125,26 +125,27 @@ Seeded memories are not counted in "stored" because they are inserted by `seed_d
 ### 4.1 Components
 | Component | Responsibility |
 |---|---|
-| `app.py` | UI, orchestration, prompts, stats |
+| `app.py` | Flask routes, orchestration, prompts, stats |
+| `templates/` and `static/` | Responsive web interface and styles |
 | `seed_data.py` | One-time synthetic data loader |
 | Hindsight (`hindsight-client`) | Persistent memory: retain, recall, reflect |
-| Groq | Low-latency LLM inference |
+| Gemini (`google-genai`) | Incident plan generation |
 | `stats.json` | Local per-bank dashboard counters |
 
 ### 4.2 Tech stack
 - Python 3.10+
-- Streamlit (UI)
+- Flask (UI)
 - `hindsight-client` (memory SDK)
-- `groq` (LLM SDK)
+- `google-genai` (LLM SDK)
 - `python-dotenv` (config)
 
 ### 4.3 Configuration (`.env`)
 | Variable | Purpose | Default |
 |---|---|---|
-| `GROQ_API_KEY` | Groq authentication | none (required) |
+| `GEMINI_API_KEY` | Gemini authentication | none (required) |
 | `HINDSIGHT_API_KEY` | Hindsight authentication | none (required) |
 | `HINDSIGHT_API_URL` | Hindsight endpoint | `https://api.hindsight.vectorize.io` |
-| `GROQ_MODEL` | LLM model override | `qwen/qwen3-32b` (alt: `openai/gpt-oss-120b`) |
+| `GEMINI_MODEL` | LLM model override | `gemini-3.8-flash` |
 
 ---
 
@@ -209,10 +210,10 @@ Each `retain` also passes a `timestamp` (UTC ISO 8601) so Hindsight can reason a
 ## 7. UX Specification
 
 ### 7.1 Layout
-- **Sidebar:** brand, memory bank selector, active bank id, learning dashboard.
-- **Tab 1, Incident Solver:** sample alert dropdown, service field, error text area, Analyze button, confidence badge, two columns (Recalled memory | Action plan), feedback buttons.
-- **Tab 2, Teach a Resolution:** form, save button, confirmation.
-- **Tab 3, Insights:** question selector, service focus, Reflect button, insight output.
+- **Navigation:** memory bank selector, active bank, learning dashboard.
+- **Incident Solver:** sample alert dropdown, service field, error text area, Analyze button, confidence badge, recalled history and action plan, feedback buttons.
+- **Teach a Resolution:** post-mortem form, save button, confirmation.
+- **Insights:** question selector, service focus, Reflect button, insight output.
 
 ### 7.2 Sample alerts (for demos)
 | Sample | Expected behavior in seeded bank |
@@ -224,7 +225,7 @@ Each `retain` also passes a `timestamp` (UTC ISO 8601) so Hindsight can reason a
 | NEW: notification-service | 🔴 No history; generic cautious plan |
 
 ### 7.3 State handling
-Analysis results are held in `st.session_state.result` so the output survives Streamlit reruns triggered by feedback buttons.
+Analysis results are held by the Flask process for feedback submission and are recorded once per analysis.
 
 ---
 
@@ -233,10 +234,10 @@ Analysis results are held in `st.session_state.result` so the output survives St
 | Area | Requirement |
 |---|---|
 | Performance | Recall and LLM response within a few seconds; demo loop under 60s |
-| Reliability | All Hindsight and Groq calls wrapped in try/except with a visible UI error |
+| Reliability | Hindsight and Gemini calls are wrapped in try/except with a visible UI error |
 | Security | Keys in `.env`, excluded via `.gitignore`; no secrets in the repo |
-| Portability | Runs locally with `streamlit run app.py`; deployable to Streamlit Community Cloud (keys via secrets) |
-| Maintainability | Small single-file app with clear sections; helper functions per external service |
+| Portability | Runs locally with `python app.py`; deployable to a Python web host |
+| Maintainability | Flask routes and templates keep UI separate from shared incident and memory logic |
 
 ---
 
@@ -257,7 +258,7 @@ Closing line: "Every outage teaches something. IncidentMind makes sure it is nev
 ## 10. Deliverables Checklist
 
 - [ ] GitHub repo with clean code and README (problem, architecture, Hindsight usage, setup)
-- [ ] Live demo (Streamlit Community Cloud or similar)
+- [ ] Live demo (Python web host or similar)
 - [ ] Demo video (60 to 90 seconds)
 - [ ] Explanation of Hindsight integration (retain, recall, reflect)
 - [ ] Article from each team member
@@ -273,7 +274,7 @@ Closing line: "Every outage teaches something. IncidentMind makes sure it is nev
 | Hindsight retain processing delay | Seed data early; wait 30 to 60s before recording |
 | SDK or auth argument differences | Client init falls back to no `api_key`; verify against the Hindsight docs |
 | `reflect` response shape differs | Uses `.text` with `str(res)` fallback; inspect the object if output looks odd |
-| Groq model unavailable or renamed | Override via `GROQ_MODEL` (e.g., `openai/gpt-oss-120b`) |
+| Gemini model unavailable or renamed | Override via `GEMINI_MODEL` |
 | LLM hallucinating history | Strict system prompt plus recalled memory shown beside the answer |
 | Weak recall on vague queries | Include service name in the query; keep seed data specific |
 | Scope creep | Ship the MVP (FR-1 to FR-3) first, then add FR-4 and FR-5 |
@@ -286,7 +287,7 @@ These were not confirmed against live services at build time and should be check
 1. Hindsight cloud base URL and the exact client authentication argument.
 2. `retain` accepts `timestamp` as an ISO string in the installed client version.
 3. `reflect` returns an object with a `.text` attribute.
-4. `qwen/qwen3-32b` is currently available on the team's Groq account.
+4. The configured Gemini model is available to the project's API key.
 
 ---
 
