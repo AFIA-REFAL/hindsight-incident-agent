@@ -1,6 +1,6 @@
 <div align="center">
 
-🧠 IncidentMind
+#🧠 IncidentMind
 
 ### The on-call AI copilot that **learns from every outage**
 
