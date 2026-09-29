@@ -1,74 +1,159 @@
-# IncidentMind
+<div align="center">
 
-IncidentMind is an on-call AI incident-response copilot that learns from every outage. It stores post-mortems and failed fixes in a memory bank, recalls the relevant past incidents for new alerts, and reflects on recurring patterns across services.
+# 🧠 IncidentMind
 
-## What it does
+### The on-call AI copilot that **learns from every outage**
 
-- Incident solver: analyze an alert or error log and retrieve similar historical incidents
-- Memory learning loop: accept feedback on whether a suggested fix worked
-- Teach a resolution: save a new incident resolution and failed steps into memory
-- Insights: ask pattern questions across the active memory bank
-- Dashboard: track memory usage, incident counts, and fix success rate
-- Durable local storage: every memory is stored in SQLite and synced to Hindsight when available
+*Stop solving the same incident twice.*
 
-## Tech stack
+**🐍 Python 3.10+ &nbsp;•&nbsp; 🌶️ Flask &nbsp;•&nbsp; 🔀 OpenRouter &nbsp;•&nbsp; 🧠 Hindsight &nbsp;•&nbsp; 🗄️ SQLite**
 
-- Python 3.10+
-- Flask
-- OpenRouter (OpenAI-compatible API)
-- Hindsight memory client
-- SQLite local memory database for restart-safe storage and offline usage
+</div>
 
-## Quick start
+---
 
-1. Create a virtual environment and install dependencies:
+## 🚨 The Problem
 
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+At 3 AM, an alert fires. Somewhere in a wiki, a Slack thread, or an engineer's head, the fix already exists, but nobody can find it. Worse, the **failed fixes** are rarely written down, so teams keep repeating them.
 
-2. Create a `.env` file based on `.env.example` and fill in the keys:
+## 💡 The Solution
 
-   ```bash
-   copy .env.example .env
-   ```
+**IncidentMind** is an incident-response copilot with a real memory. It stores post-mortems *and* failed fixes, recalls the most relevant past incidents when a new alert arrives, and reflects on recurring patterns across your services. Every outage makes the next one faster to resolve.
 
-3. Run the app:
+---
 
-   ```bash
-   python app.py
-   ```
+## ✨ Features
 
-4. Optional: seed a bank manually:
+| | Feature | Description |
+|---|---|---|
+| 🔍 | **Incident Solver** | Paste an alert or error log and get analysis plus similar historical incidents |
+| 🔁 | **Memory Learning Loop** | Give feedback on whether a suggested fix worked, and memory improves |
+| 🎓 | **Teach a Resolution** | Save a new resolution and the failed steps into memory |
+| 📈 | **Insights** | Ask pattern questions across the active memory bank |
+| 📊 | **Dashboard** | Track memory usage, incident counts, and fix success rate |
+| 💾 | **Durable Local Storage** | Every memory is stored in SQLite and synced to Hindsight when available |
 
-   ```bash
-   python seed_data.py --bank-id devops-incidents
-   ```
+---
 
-Memories and bank names are stored in `.incidentmind/memory.sqlite3`. Existing JSON memories in `.incidentmind/banks/` are imported automatically once. When Hindsight is configured, locally saved memories are synced during the next bank operation; if Hindsight is unavailable, they remain in SQLite and the app displays the sync status. Keep the SQLite database on the same machine to preserve local data. Runtime database and counter files are excluded from Git; the checked-in JSON bank remains as a one-time import source.
+## 🏗️ How It Works
 
-## Environment variables
+```mermaid
+flowchart LR
+    A[🚨 New Alert / Error Log] --> B[Flask App]
+    B --> C{Recall similar incidents}
+    C -->|Hindsight| D[(🧠 Memory Bank)]
+    C -->|Offline fallback| E[(💾 SQLite)]
+    D --> F[🤖 LLM via OpenRouter]
+    E --> F
+    F --> G[✅ Grounded fix suggestion]
+    G --> H[👍 Feedback / Teach resolution]
+    H --> D
+    H --> E
+```
 
-- `OPENROUTER_API_KEY`: OpenRouter API key
-- `OPENROUTER_MODEL`: model override, default `openrouter/free`
-- `HINDSIGHT_API_KEY`: Hindsight API key
-- `HINDSIGHT_API_URL`: Hindsight endpoint, default `https://api.hindsight.vectorize.io`
+**The learning loop:** alert → recall → suggest → feedback → memory → smarter next time.
 
-## Demo flow
+---
 
-1. Start with a fresh empty bank
-2. Analyze a sample alert to show no-history guidance
-3. Teach the resolution or submit feedback
-4. Analyze a similar alert again and confirm the memory is recalled
-5. Open the Insights tab and the dashboard to review trends
+## 🧰 Tech Stack
 
-## Repository structure
+- 🐍 **Python 3.10+**
+- 🌶️ **Flask** for the web UI and orchestration
+- 🔀 **OpenRouter** (OpenAI-compatible API) for LLM reasoning
+- 🧠 **Hindsight** memory client for long-term incident memory
+- 🗄️ **SQLite** for restart-safe, offline-capable local storage
 
-- `app.py`: Flask UI routes and incident orchestration
-- `templates/`: responsive incident solver, resolution, and insights screens
-- `static/styles.css`: application styling
-- `seed_data.py`: synthetic incident dataset loader for the seeded bank
-- `requirements.txt`: Python dependencies
-- `.env.example`: environment variable template
+---
+
+## 🚀 Quick Start
+
+**1. Create a virtual environment and install dependencies**
+
+```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+**2. Configure your environment**
+
+```bash
+# Windows
+copy .env.example .env
+# macOS / Linux
+cp .env.example .env
+```
+
+Then fill in your keys (see [Environment Variables](#-environment-variables)).
+
+**3. Run the app**
+
+```bash
+python app.py
+```
+
+**4. (Optional) Seed a demo bank**
+
+```bash
+python seed_data.py --bank-id devops-incidents
+```
+
+---
+
+## 🔐 Environment Variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `OPENROUTER_API_KEY` | OpenRouter API key | required |
+| `OPENROUTER_MODEL` | Model override | `openrouter/free` |
+| `HINDSIGHT_API_KEY` | Hindsight API key | required for sync |
+| `HINDSIGHT_API_URL` | Hindsight endpoint | `https://api.hindsight.vectorize.io` |
+
+---
+
+## 🎬 Demo Flow
+
+1. 🆕 Start with a **fresh, empty bank**
+2. 🚨 **Analyze a sample alert** and see the no-history guidance
+3. 🎓 **Teach the resolution** or submit feedback
+4. 🔁 **Analyze a similar alert again** and watch the memory get recalled
+5. 📈 Open the **Insights** tab and the **dashboard** to review trends
+
+---
+
+## 💾 Data & Persistence
+
+- Memories and bank names live in `.incidentmind/memory.sqlite3`.
+- Existing JSON memories in `.incidentmind/banks/` are **imported automatically, once**.
+- With Hindsight configured, locally saved memories **sync on the next bank operation**.
+- If Hindsight is unavailable, memories **stay safely in SQLite** and the app shows the sync status.
+- Keep the SQLite database on the same machine to preserve local data.
+- Runtime database and counter files are excluded from Git; the checked-in JSON bank remains as a one-time import source.
+
+---
+
+## 📁 Repository Structure
+
+```text
+IncidentMind/
+├── app.py            # Flask UI routes and incident orchestration
+├── templates/        # Responsive solver, resolution, and insights screens
+├── static/
+│   └── styles.css    # Application styling
+├── seed_data.py      # Synthetic incident dataset loader
+├── requirements.txt  # Python dependencies
+└── .env.example      # Environment variable template
+```
+
+---
+
+<div align="center">
+
+**Built so your team never fixes the same outage twice.** 🛡️
+
+</div>
