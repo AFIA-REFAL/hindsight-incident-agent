@@ -104,6 +104,44 @@ python seed_data.py --bank-id devops-incidents
 ```
 
 ---
+## **🛠️ Troubleshooting**
+
+### Virtual environment is not activated
+
+If the `python` or `pip` commands are not recognized, make sure the virtual environment is activated.
+
+On Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+On macOS / Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+### Missing environment variables
+
+If the application reports a missing API key, verify that the `.env` file exists and contains the required values from `.env.example`.
+
+At minimum, configure:
+
+* `OPENROUTER_API_KEY`
+* `HINDSIGHT_API_KEY` (required only when Hindsight synchronization is needed)
+
+### Hindsight is unavailable
+
+The application can continue using its local SQLite memory when Hindsight is unavailable. Check the sync status shown by the application before troubleshooting the external service.
+
+### Dependencies are missing
+
+If you encounter an import error after cloning the repository, install the project dependencies again:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## 🔐 Environment Variables
 
